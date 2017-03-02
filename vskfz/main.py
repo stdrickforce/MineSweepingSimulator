@@ -226,4 +226,4 @@ def simulate():
     mine_number = int(args.mine_number)
 
     s = Simulator(height, width, mine_number)
-    s.start()
+    s.run()
