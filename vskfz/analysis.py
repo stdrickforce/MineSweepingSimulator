@@ -14,16 +14,16 @@ cases = {
     'advanced': (16, 30, 99),
 }
 
-times = 10000
+times = 1000
 
 res = {}
 
 for name, args in cases.items():
     t = [0, 0]
     for i in range(times):
-        print(i)
         s = Simulator(*args, stdout=False)
         t[s.run()] += 1
+    print(t)
     res[name] = {
         'win': t[1],
         'lose': t[0],

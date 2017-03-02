@@ -46,6 +46,8 @@ class Simulator(object):
 
         self._height = height
         self._width = width
+        self._mine_count = mine_count
+        self._flag_count = 0
         self._size = width * height
         self._sides = set()
         self._borders = set()
@@ -110,6 +112,7 @@ class Simulator(object):
                 if 0 < map_current[i][j] < 9:
                     self._add_to_sides(i, j)
                 else:
+                    self._remove_from_borders(i, j)
                     self._remove_from_wasteland(i, j)
 
         # logger.info(self._sides)
@@ -121,7 +124,6 @@ class Simulator(object):
 
     def _make_decision(self):
 
-        res = []
         for i, j in self._sides:
             uc, fc = self._map_record[i][j]
             if uc == 0:
@@ -130,28 +132,57 @@ class Simulator(object):
             if self._map_last[i][j] == fc:
                 for x, y in self._around(i, j):
                     if self._map_last[x][y] == Map.UNEXPLORED:
-                        res.append((x, y, 'click'))
+                        yield x, y, 'click'
                 self._remove_from_sides(i, j)
-                return res
+                return
 
             # cell number euqlas to sum of flaged count and unexplored count
             # leads to all the nearby cells are mines
             elif self._map_last[i][j] - fc == uc:
                 for x, y in self._around(i, j):
                     if self._map_last[x][y] == Map.UNEXPLORED:
-                        res.append((x, y, 'right_click'))
+                        self._flag_count += 1
+                        yield x, y, 'right_click'
                 self._remove_from_sides(i, j)
-                return res
+                return
+
+        if not self._borders:
+            i, j = self._wasteland.pop()
+            yield i, j, 'click'
+            return
+
+        border_map = {}
+        for i, j in self._borders:
+            v = 0.0
+            for x, y in self._around(i, j):
+                if (x, y) not in self._sides:
+                    continue
+                uc, fc = self._map_record[x][y]
+                v = max(v, float(self._map_last[x][y] - fc) / uc)
+            border_map[(i, j)] = v
+
+        min_pr = min(border_map.values())
+        candidates = []
+        for key, pr in border_map.items():
+            if abs(pr - min_pr) < 0.01:
+                candidates.append(key)
 
         if self._wasteland:
-            i, j = self._wasteland.pop()
-        else:
-            i, j = self._borders.pop()
-        return [(i, j, 'click')]
+            remain = self._mine_count - self._flag_count
+            total = len(self._wasteland)
+            wasteland_pr = float(remain) / total
+            if wasteland_pr < min_pr:
+                i, j = self._wasteland.pop()
+                logger.info('guess in %s (wasteland)', 1 - wasteland_pr)
+                yield i, j, 'click'
+
+        logger.info('guess in %s (border)', 1 - min_pr)
+        i, j = random.choice(candidates)
+        yield i, j, 'click'
 
     def run(self):
         try:
-            self.map.click(1, 1)
+            self.map.click(self._height / 2, self._width / 2)
             while True:
                 self._collect_map()
                 for x, y, operate in self._make_decision():
@@ -164,22 +195,22 @@ class Simulator(object):
 
 
 if __name__ == '__main__':
-    height = 16
-    width = 30
-    mine_number = 99
+    height = 40
+    width = 40
+    mine_number = 300
 
-    # s = Simulator(height, width, mine_number)
-    # s.run()
+    s = Simulator(height, width, mine_number)
+    s.run()
 
-    w, l = 0, 0
-    for i in range(10000):
-        logger.info(i)
-        s = Simulator(height, width, mine_number, stdout=False)
-        if s.run():
-            w += 1
-        else:
-            l += 1
-    print(w, l)
+    # w, l = 0, 0
+    # for i in range(10000):
+    #     logger.info(i)
+    #     s = Simulator(height, width, mine_number, stdout=True)
+    #     if s.run():
+    #         w += 1
+    #     else:
+    #         l += 1
+    # print(w, l)
 
 
 def simulate():
