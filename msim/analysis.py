@@ -6,7 +6,7 @@
 
 # import time
 
-from vskfz.main import Simulator
+from msim.main import Simulator
 
 cases = {
     'basic': (9, 9, 10),

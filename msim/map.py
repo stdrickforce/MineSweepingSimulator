@@ -11,7 +11,7 @@ import random
 import time  # noqa
 import os
 
-from vskfz import config
+from msim import config
 
 logging.config.dictConfig(config.LOGGING_SETTINGS)
 logger = logging.getLogger('main')

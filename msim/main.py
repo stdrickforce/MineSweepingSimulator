@@ -9,8 +9,8 @@ import logging.config
 import random  # noqa
 import time  # noqa
 
-from vskfz import config
-from vskfz.map import (  # noqa
+from msim import config
+from msim.map import (  # noqa
     BoomException,
     WinException,
     Map,

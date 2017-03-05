@@ -8,7 +8,7 @@ except IOError:
 
 entry_points = {
     'console_scripts': [
-        'sweep = vskfz.main:simulate'
+        'sweep = msim.main:simulate'
     ],
 }
 

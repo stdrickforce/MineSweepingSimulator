@@ -20,7 +20,7 @@ LOGGING_SETTINGS = {
             'level': 'INFO',
             'class': 'logging.FileHandler',
             'formatter': 'general',
-            'filename': '/Users/stdrickforce/mine.log',
+            'filename': 'mine.log',
         },
     },
     'formatters': {
