@@ -8,7 +8,7 @@ except IOError:
 
 entry_points = {
     'console_scripts': [
-        'sweep = msim.main:simulate'
+        'mine-sweeping = msim.main:simulate'
     ],
 }
 

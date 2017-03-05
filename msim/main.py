@@ -34,7 +34,7 @@ class Simulator(object):
         "Big job, huh?",
     ]
 
-    def __init__(self, height, width, mine_count, stdout=True):
+    def __init__(self, height=9, width=9, mine_count=10, stdout=True):
         self.map = Map(height, width, mine_count, stdout=stdout)
 
         self._height = height
