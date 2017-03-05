@@ -17,48 +17,54 @@ logging.config.dictConfig(config.LOGGING_SETTINGS)
 logger = logging.getLogger('main')
 
 
-class BoomException:
+class BoomException(BaseException):
     pass
 
 
-class WinException:
+class WinException(BaseException):
     pass
 
 
 class Map(object):
 
+    EMPTY = ' '
     UNEXPLORED = '_'
-    FLAGED = '#'
+    SAFE = '&'
+    FLAG = '#'
     MINE = '*'
-    EXPLODED_MINE = 'X'
+    EXPLODE_MINE = 'X'
 
     def __init__(self, height, width, mine_count, stdout=True):
         logger.info('a new map generated')
-        if mine_count > height * width - 1:
+        if mine_count > height * width - 9:
             raise Exception('no enough space to place mine')
         self._height = height
         self._width = width
         self._mine_count = mine_count
-        self._mines = set()
-        self._need_explored = set()
         self._size = height * width
-        self._real_mine_count = 0
         self._initialized = False
         self._stdout = stdout
+
+        self._cell_remain = height * width
+        self._mine_remain = mine_count
+        self._click = 0
 
         self._map = []
         self._map_visible = []
         for i in range(self._height):
             self._map.append([0] * self._width)
             self._map_visible.append([self.UNEXPLORED] * self._width)
-        for i in range(self._size):
-            self._need_explored.add(i)
         self._print_map()
 
     def _print_map(self):
         if not self._stdout:
             return
         os.system('clear')
+        print('mines: %4s/%s\tunexplored:%4s/%s\tclick:%4s\n' % (
+            self._mine_remain, self._mine_count,
+            self._cell_remain, self._size,
+            self._click,
+        ))
         for i in range(self._height):
             s = ''
             for j in range(self._width):
@@ -76,6 +82,7 @@ class Map(object):
 
     @_refresh_map
     def click(self, x, y):
+        self._click += 1
         if not self._initialized:
             self._initialized = True
             self._initMap(x, y)
@@ -84,52 +91,65 @@ class Map(object):
             self._boom(x, y)
         elif self._map_visible[x][y] == self.UNEXPLORED:
             self._extend(x, y)
-        if not self._need_explored:
-            self._win()
+        if self._cell_remain == 0:
+            raise WinException()
 
     @_refresh_map
     def right_click(self, x, y):
-        '''
-        mark a cell with flag
-        '''
-        if self._map_visible[x][y] == self.FLAGED:
+        self._click += 1
+        if self._map_visible[x][y] == self.FLAG:
+            self._cell_remain += 1
+            if self._map[x][y] == self.MINE:
+                self._mine_remain += 1
             self._setVisible(x, y, self.UNEXPLORED)
         elif self._map_visible[x][y] == self.UNEXPLORED:
-            self._setVisible(x, y, self.FLAGED)
+            self._cell_remain -= 1
+            if self._map[x][y] == self.MINE:
+                self._mine_remain -= 1
+            self._setVisible(x, y, self.FLAG)
+        if self._cell_remain == 0 and self._mine_remain == 0:
+            raise WinException()
+
+    @_refresh_map
+    def double_click(self, x, y):
+        self._click += 1
+        for i, j in self._around(x, y):
+            if self._map_visible[i][j] == self.UNEXPLORED:
+                self.click(i, j)
 
     def get_visible_map(self):
         return self._map_visible
+
+    def get_statistics(self):
+        return {
+            'mine_remain': self._mine_remain,
+            'cell_remain': self._cell_remain,
+        }
 
     def _boom(self, x, y):
         for i in range(self._height):
             for j in range(self._width):
                 if self._map[i][j] == self.MINE:
                     self._setVisible(i, j, self.MINE)
-        self._setVisible(x, y, self.EXPLODED_MINE)
+        self._setVisible(x, y, self.EXPLODE_MINE)
         raise BoomException()
 
     def _win(self):
         for i in range(self._height):
             for j in range(self._width):
                 if self._map[i][j] == self.MINE:
-                    self._setVisible(i, j, self.FLAGED)
+                    self._setVisible(i, j, self.FLAG)
         raise WinException()
 
     def _setMine(self, x, y):
         '''
         setup a mine at (i, j) cell
         '''
-        if self._real_mine_count >= self._mine_count:
-            return
         self._map[x][y] = self.MINE
         for i, j in self._around(x, y):
             if self._map[i][j] == self.MINE:
                 continue
             self._map[i][j] += 1
-        self._mines.add((x, y))
-        pos = x * self._width + y
-        self._need_explored.remove(pos)
-        self._real_mine_count += 1
 
     def _setVisible(self, x, y, c):
         self._map_visible[x][y] = c
@@ -138,13 +158,22 @@ class Map(object):
         '''
         initialize map, cell(x, y) should not coutain a mine.
         '''
-        ps = random.sample(range(self._size), self._mine_count + 1)
-        for p in ps:
-            i = p / self._width
-            j = p % self._width
-            if i == x and j == y:
+        n = self._mine_count
+        xs = set([x - 1, x, x + 1])
+        ys = set([y - 1, y, y + 1])
+        while n > 0:
+            i = int(random.random() * self._height)
+            j = int(random.random() * self._width)
+            if self._map[i][j] == self.MINE:
+                continue
+            if i in xs and j in ys:
                 continue
             self._setMine(i, j)
+            n -= 1
+        for i in range(self._height):
+            for j in range(self._width):
+                if self._map[i][j] == 0:
+                    self._map[i][j] = self.EMPTY
 
     def _around(self, x, y):
         '''
@@ -164,11 +193,10 @@ class Map(object):
         s = [(x, y)]
         while s:
             i, j = s.pop()
-            pos = i * self._width + j
-            if pos in self._need_explored:
-                self._need_explored.remove(pos)
+            if self._map_visible[i][j] == self.UNEXPLORED:
+                self._cell_remain -= 1
             self._setVisible(i, j, self._map[i][j])
-            if self._map[i][j] != 0:
+            if self._map[i][j] != self.EMPTY:
                 continue
             for p, q in self._around(i, j):
                 if self._map_visible[p][q] == self.UNEXPLORED:
@@ -179,7 +207,6 @@ if __name__ == '__main__':
     h = 10
     w = 10
     m = Map(h, w, 10)
-    for i in range(h):
-        for j in range(w):
-            m.click(i, j)
-    print(m._need_explored)
+    m.click(5, 5)
+    import IPython
+    IPython.embed()

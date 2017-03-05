@@ -22,11 +22,6 @@ logger = logging.getLogger('main')
 
 class Simulator(object):
 
-    UNEXPLORED = '_'
-    FLAGED = '#'
-    MINE = '*'
-    EXPLODED_MINE = 'X'
-
     SENTENCES = [
         "Not difficult to me.",
         "It's too easy to me.",
@@ -41,21 +36,12 @@ class Simulator(object):
 
     def __init__(self, height, width, mine_count, stdout=True):
         self.map = Map(height, width, mine_count, stdout=stdout)
-        self._map_last = [[self.UNEXPLORED] * width for i in range(height)]
-        self._map_record = [[None] * width for i in range(height)]
 
         self._height = height
         self._width = width
         self._mine_count = mine_count
         self._flag_count = 0
         self._size = width * height
-        self._sides = set()
-        self._borders = set()
-        self._wasteland = set()
-
-        for i in range(self._height):
-            for j in range(self._width):
-                self._wasteland.add((i, j))
 
     def _around(self, x, y):
         for i in range(-1, 2, 1):
@@ -68,126 +54,158 @@ class Simulator(object):
                     continue
                 yield x + i, y + j
 
-    def _add_to_sides(self, x, y):
-        self._sides.add((x, y))
-        for i, j in self._around(x, y):
-            if self._map_last[i][j] == Map.UNEXPLORED:
-                self._add_to_borders(i, j)
-        self._remove_from_borders(x, y)
-        self._remove_from_wasteland(x, y)
-
-    def _add_to_borders(self, x, y):
-        self._borders.add((x, y))
-        self._remove_from_wasteland(x, y)
-
-    def _remove_from_sides(self, x, y):
-        if (x, y) in self._sides:
-            self._sides.remove((x, y))
-
-    def _remove_from_borders(self, x, y):
-        if (x, y) in self._borders:
-            self._borders.remove((x, y))
-
-    def _remove_from_wasteland(self, x, y):
-        if (x, y) in self._wasteland:
-            self._wasteland.remove((x, y))
-
     def _calculate(self, x, y):
         uc, fc = 0, 0
+        mc = self._map[x][y]
         for i, j in self._around(x, y):
-            if self._map_last[i][j] == Map.UNEXPLORED:
+            if self._map[i][j] == Map.UNEXPLORED:
                 uc += 1
-            elif self._map_last[i][j] == Map.FLAGED:
+            elif self._map[i][j] == Map.FLAG:
                 fc += 1
-        self._map_record[x][y] = uc, fc
+                mc -= 1
+        return uc, fc, mc
 
-    def _collect_map(self):
-        map_current = self.map.get_visible_map()
+    def _graph(self):
+        self._map = self.map.get_visible_map()
+
+        explored = set()
+        sides = set()
+        borders = set()
+
+        def _explore(i, j):
+            if (i, j) in explored:
+                return
+            if self._map[i][j] != Map.UNEXPLORED:
+                return
+
+            s = [(i, j)]
+            while s:
+                i, j = s.pop()
+                explored.add((i, j))
+                for x, y in self._around(i, j):
+                    if self._map[x][y] == Map.UNEXPLORED:
+                        if (x, y) not in explored:
+                            s.append((x, y))
+                    elif isinstance(self._map[x][y], int):
+                        sides.add((x, y))
+                        borders.add((i, j))
+
         for i in range(self._height):
             for j in range(self._width):
-                # 地图若无变化，则不触发任何条件
-                if map_current[i][j] == self._map_last[i][j]:
-                    continue
-                self._map_last[i][j] = map_current[i][j]
-                if 0 < map_current[i][j] < 9:
-                    self._add_to_sides(i, j)
-                else:
-                    self._remove_from_borders(i, j)
-                    self._remove_from_wasteland(i, j)
+                _explore(i, j)
 
-        # logger.info(self._sides)
-        # logger.info(self._borders)
-        # logger.info(self._wasteland)
+        return list(sides), list(borders), explored - borders
 
-        for i, j in self._sides:
-            self._calculate(i, j)
+    def _search(self, x, y):
+
+        votes = {}
+
+        def _try(mark):
+
+            c, s = 0, []
+
+            def _mark(x, y, mark):
+                self._map[x][y] = mark
+                s.append((x, y, mark))
+            _mark(x, y, mark)
+
+            def _clear(s):
+                for a, b, mark in s:
+                    self._map[a][b] = Map.UNEXPLORED
+
+            while c < len(s):
+                a, b, mark = s[c]
+                for i, j in self._around(a, b):
+                    if not isinstance(self._map[i][j], int):
+                        continue
+                    uc, fc, mc = self._calculate(i, j)
+                    if mc < 0 or uc < mc:
+                        _clear(s)
+                        return False
+                    elif uc == mc:
+                        for p, q in self._around(i, j):
+                            if self._map[p][q] == Map.UNEXPLORED:
+                                _mark(p, q, Map.FLAG)
+                    elif mc == 0:
+                        for p, q in self._around(i, j):
+                            if self._map[p][q] == Map.UNEXPLORED:
+                                _mark(p, q, Map.SAFE)
+                c += 1
+
+            for a, b, mark in s:
+                key = (a, b)
+                votes.setdefault(key, 0)
+                if mark == Map.SAFE:
+                    votes[key] += 1
+                elif mark == Map.FLAG:
+                    votes[key] += 3
+                self._map[a][b] = Map.UNEXPLORED
+            return True
+
+        if not _try(Map.FLAG):
+            yield x, y, 'click'
+            return
+        if not _try(Map.SAFE):
+            yield x, y, 'right_click'
+            return
+
+        for k, v in votes.items():
+            if v == 2:
+                yield k[0], k[1], 'click'
+            elif v == 6:
+                yield k[0], k[1], 'right_click'
 
     def _make_decision(self):
 
-        for i, j in self._sides:
-            uc, fc = self._map_record[i][j]
-            if uc == 0:
-                continue
-            # cell number equals to flaged count leads to no mines nearby.
-            if self._map_last[i][j] == fc:
+        decisions = {}
+
+        sides, borders, wastelands = self._graph()
+
+        for i, j in sides:
+            uc, fc, mc = self._calculate(i, j)
+            if mc == 0:
+                decisions[(i, j)] = 'double_click'
+            elif uc == mc:
                 for x, y in self._around(i, j):
-                    if self._map_last[x][y] == Map.UNEXPLORED:
-                        yield x, y, 'click'
-                self._remove_from_sides(i, j)
-                return
+                    if self._map[x][y] == Map.UNEXPLORED:
+                        decisions[(x, y)] = 'right_click'
+        if decisions:
+            return decisions
 
-            # cell number euqlas to sum of flaged count and unexplored count
-            # leads to all the nearby cells are mines
-            elif self._map_last[i][j] - fc == uc:
-                for x, y in self._around(i, j):
-                    if self._map_last[x][y] == Map.UNEXPLORED:
-                        self._flag_count += 1
-                        yield x, y, 'right_click'
-                self._remove_from_sides(i, j)
-                return
+        for i, j in borders:
+            for x, y, operate in self._search(i, j):
+                return {(x, y): operate}
 
-        if not self._borders:
-            i, j = self._wasteland.pop()
-            yield i, j, 'click'
-            return
+        corner, edge, inside = [], [], []
+        for i, j in wastelands:
+            p = i in [0, self._height - 1]
+            q = j in [0, self._width - 1]
+            if p and q:
+                corner.append((i, j))
+            elif p or q:
+                edge.append((i, j))
+            else:
+                inside.append((i, j))
 
-        border_map = {}
-        for i, j in self._borders:
-            v = 0.0
-            for x, y in self._around(i, j):
-                if (x, y) not in self._sides:
-                    continue
-                uc, fc = self._map_record[x][y]
-                v = max(v, float(self._map_last[x][y] - fc) / uc)
-            border_map[(i, j)] = v
-
-        min_pr = min(border_map.values())
-        candidates = []
-        for key, pr in border_map.items():
-            if abs(pr - min_pr) < 0.01:
-                candidates.append(key)
-
-        if self._wasteland:
-            remain = self._mine_count - self._flag_count
-            total = len(self._wasteland)
-            wasteland_pr = float(remain) / total
-            if wasteland_pr < min_pr:
-                i, j = self._wasteland.pop()
-                logger.info('guess in %s (wasteland)', 1 - wasteland_pr)
-                yield i, j, 'click'
-
-        logger.info('guess in %s (border)', 1 - min_pr)
-        i, j = random.choice(candidates)
-        yield i, j, 'click'
+        if corner:
+            return {random.choice(corner): 'click'}
+        elif edge:
+            return {random.choice(edge): 'click'}
+        elif inside:
+            return {random.choice(inside): 'click'}
+        else:
+            return {random.choice(borders): 'click'}
 
     def run(self):
         try:
-            self.map.click(self._height / 2, self._width / 2)
+            self.map.click(
+                int(self._height / 2),
+                int(self._width / 2)
+            )
             while True:
-                self._collect_map()
-                for x, y, operate in self._make_decision():
-                    getattr(self.map, operate)(x, y)
-
+                for p, operate in self._make_decision().items():
+                    # logger.info('%s: %s, %s' % (operate, p[0], p[1]))
+                    getattr(self.map, operate)(*p)
         except BoomException:
             return False
         except WinException:
@@ -195,9 +213,10 @@ class Simulator(object):
 
 
 if __name__ == '__main__':
-    height = 40
-    width = 40
-    mine_number = 300
+
+    height = 16
+    width = 30
+    mine_number = 99
 
     s = Simulator(height, width, mine_number)
     s.run()
